@@ -28,6 +28,15 @@ sudo vim /var/www/html/test.php
 sudo systemctl restart apache2
 http://x.x.x.x/test.php
 
+sudo vim /etc/php/8.1/apache2/php.ini
+memory_limit = 256M
+post_max_size = 100M
+upload_max_filesize = 100M
+max_execution_time = 360
+date.timezone = America / Chicago   America/Sao_Paulo
+
+sudo systemctl restart apache2
+
 --Install mariadb
 sudo apt install mariadb-server mariadb-client -y
 sudo systemctl status mariadb
@@ -129,7 +138,7 @@ sudo chown -R www-data:www-data /var/lib/ocsinventory-reports/
 
 sudo systemctl restart apache2
 
-### Security Alert
+#Security Alert
 
 cd /usr/share/ocsinventory-reports/ocsreports
 
@@ -139,5 +148,168 @@ sudo systemctl restart apache2
 
 lsb_release -a
 
-##Certificate
+### Install OCS Inventory Agent
+
+sudo apt install make gcc libmodule-install-perl dmidecode libxml-simple-perl libcompress-zlib-perl openssl libnet-ip-perl libwww-perl libdigest-md5-perl libdata-uuid-perl libcrypt-ssleay-perl libnet-snmp-perl libproc-pid-file-perl libproc-daemon-perl net-tools libsys-syslog-perl pciutils smartmontools read-edid nmap libnet-netmask-perl
+
+sudo wget https://github.com/OCSInventory-NG/UnixAgent/releases/download/v2.10.0/Ocsinventory-Unix-Agent-2.10.0.tar.gz
+ll
+sudo tar -xvf Ocsinventory-Unix-Agent-2.10.0.tar.gz
+
+cd Ocsinventory-Unix-Agent-2.10.0/
+ls
+
+sudo perl Makefile.PL
+sudo make
+sudo make install
+
+Do you want to configure the agent?
+Please enter 'y' or 'n'?> [y]
+Where do you want to write the configuration file?
+ 0 -> /etc/ocsinventory
+ 1 -> /usr/local/etc/ocsinventory
+ 2 -> /etc/ocsinventory-agent
+?>  2
+Do you want to create the directory /etc/ocsinventory-agent?
+y
+Should the old unix_agent settings be imported?
+y
+[info] The config file will be written in /etc/ocsinventory-agent/ocsinventory-agent.cfg,
+What is the address of your ocs server?>  http://10.5.0.6/ocsinventory
+Do you need credential for the server? (You probably don't)
+n
+Do you want to apply an administrative tag on this machine?
+y
+tag?>  Ubuntu-Client1
+Do yo want to install the cron task in /etc/cron.d?
+[y]
+Where do you want the agent to store its files? (You probably don't need to change it)?> [/var/lib/ocsinventory-agent]
+Do you want to create the /var/lib/ocsinventory-agent directory?
+[y]
+Should I remove the old unix_agent?
+y
+Do you want to activate debug configuration option?
+[y]
+Do you want to use OCS Inventory NG UNix Unified agent log file?
+[y]
+Specify log file path you want to use?>  /var/log/ocs-inventory-agent.log
+Do you want disable SSL CA verification configuration option (not recommended)?
+Please enter 'y' or 'n'?> [n] y
+Do you want to set CA certificates file path?
+Please enter 'y' or 'n'?> [y] n
+Do you want disable software inventory?
+Please enter 'y' or 'n'?> [n]
+Do you want to use OCS-Inventory software deployment feature?
+Please enter 'y' or 'n'?> [y]
+Do you want to use OCS-Inventory SNMP scans feature?
+Please enter 'y' or 'n'?> [y]
+Do you want to send an inventory of this machine?
+Please enter 'y' or 'n'?> [y]
+done
+   -> Success!
+New settings written! Thank you for using OCS Inventory
+
+---
+#IP Discovery
+
+root@SRVOCS:/var/log# echo > ocs-inventory-agent.log
+tail -f ocs-inventory-agent.log
+Outra janela:
+root@SRVOCS:/# ocsinventory-agent --debug
+
+
+#SSL Apache
+https://github.com/vaamonde/ocsinventory
+
+sudo apt install openssl -y
+
+root@SRVOCS:/etc/ssl# ls
+certs  openssl.cnf  private
+root@SRVOCS:/etc/ssl# openssl genrsa -des3 -out ocs.key 2048
+
+root@SRVOCS:/etc/ssl# openssl req -new -key ocs.key -out ocs.csr
+
+root@SRVOCS:/etc/ssl# openssl x509 -req -days 3650 -in ocs.csr -signkey ocs.key -out ocs.crt
+
+root@SRVOCS:/etc/ssl# cp -v ocs.crt /etc/ssl/certs/
+
+root@SRVOCS:/etc/ssl# cp -v ocs.key /etc/ssl/private/
+
+##"Fazendo o backup do arquivo default-ssl.conf, aguarde..."
+# opção do comando: &>> (redirecionar a saída padrão)
+# opção do comando mv: v (verbose)
+root@SRVOCS:/etc/apache2# ln -s /etc/apache2/sites-available/default-ssl.conf /etc/apache2/sites-enabled/default-ssl.conf
+root@SRVOCS:cp -v /etc/apache2/sites-available/default-ssl.conf /etc/apache2/sites-available/default-ssl.conf.bkp
+
+##Now we need to adjust Apache configuration to support SSL and secure downloads folder
+vim /etc/apache2/sites-enabled/default-ssl.conf
+//** replace original values with below or adjust them to match below:
+	SSLCertificateFile      /etc/ssl/certs/ocsng.pem            
+	SSLCertificateKeyFile /etc/ssl/private/ocsng.key
+
+	//** at the end of file, right before </VirtualHost>
+	
+	Alias /download /var/lib/ocsinventory-reports/download
+		<Directory /var/lib/ocsinventory-reports/download>
+			<IfModule mod_authz_core.c>
+			 # Apache 2.4
+			 #Require all denied
+			 Require host localhost
+			Require ip 127.0.0.1
+			Require ip 192.168
+		   </IfModule>
+		   <IfModule !mod_authz_core.c>
+			Order deny,allow
+			#Deny from all
+			Deny from all
+			Allow from 127.0.0.1 ::1
+			Allow from 192.168
+			Allow from localhost
+	   </IfModule>
+	</Directory>
+	
+##Now, the second OCS config file:
+vim /etc/apache2/conf-enabled/ocsinventory-reports.conf
+
+ # Uncomment following to force use of HTTPS in Administration Server
+		
+	<Directory /var/lib/ocsinventory-reports/download>
+	   <IfModule mod_authz_core.c>
+		 # Apache 2.4
+		 #Require all denied
+		Require host localhost
+		Require ip 127.0.0.1
+		Require ip 192.168
+		
+	   </IfModule>
+	   <IfModule !mod_authz_core.c>
+		 Order deny,allow
+		  #Allow from all
+		Deny from all
+		Allow from 127.0.0.1 ::1
+		Allow from 192.168
+		Allow from localhost
+	   </IfModule>
+	</Directory>
+	Alias /download /var/lib/ocsinventory-reports/download
+
+//restart apache
+sudo systemctl restart apache2
+
+vim /usr/share/apache2/pass
+This will open vim editor. Paste below code:
+
+#!/bin/sh
+echo "PASSWORD_FOR_CERT_KEY_GOES_HERE"
+
+--Make the passphrase-file executable:
+chmod +x /usr/share/apache2/pass
+
+--Now, tell apache to use above file as password:
+vim /etc/apache2/sites-enabled/default-ssl.conf
+and ADD following (end of file):
+
+SSLPassPhraseDialog exec:/usr/share/apache2/pass
+
+**sudo apache2ctl configtest
 
